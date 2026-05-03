@@ -16,6 +16,10 @@
 
 **如需 Worker 部署方式，请切换到 `worker` 分支查看(worker代码非最新)， 已经部署worker的，可以直接绑定原来的数据库即可完成迁移**
 
+## 📝 更新记录
+
+详细改动记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 
 ---
 
@@ -39,6 +43,8 @@
 - 优选 Cloudflare IP/域名配置
 - 自定义端口（默认 443）
 - 批量操作支持
+- 支持同步黑名单，已拉黑 CFIP 不参与 CF 同步和订阅生成
+- 管理列表会保留已拉黑 CFIP，便于后续解黑或继续维护备注、测速和状态
 
 ### 4️⃣ 订阅生成
 - **VLESS 订阅**：一键生成 VLESS 协议订阅链接
@@ -343,7 +349,7 @@
 - 支持中文备注（已修复编码问题）
 
 **订阅特性：**
-- 自动组合所有启用的 CFIP 和 ProxyIP/Outbound
+- 自动组合所有启用且未拉黑的 CFIP 和 ProxyIP/Outbound
 - 节点命名格式：`CFIP备注-ProxyIP备注-协议`（如：`香港-代理1-VLESS`、`美国-代理2-SS`）
 - 配置自动保存，刷新页面后自动加载
 - 支持一键复制订阅地址
@@ -368,31 +374,31 @@
    ```
    https://你的Pages域名/sub/你的UUID?proxyip=1
    ```
-   生成ID为1的ProxyIP × 所有启用的CFIP的订阅
+   生成ID为1的ProxyIP × 所有启用且未拉黑的CFIP的订阅
 
 2. **指定多个ProxyIP**：
    ```
    https://你的Pages域名/sub/你的UUID?proxyip=1,3,5
    ```
-   生成ID为1、3、5的ProxyIP × 所有启用的CFIP的订阅
+   生成ID为1、3、5的ProxyIP × 所有启用且未拉黑的CFIP的订阅
 
 3. **指定全局出站**：
    ```
    https://你的Pages域名/sub/你的UUID?outbound=2,4
    ```
-   生成ID为2、4的全局出站 × 所有启用的CFIP的订阅
+   生成ID为2、4的全局出站 × 所有启用且未拉黑的CFIP的订阅
 
 4. **同时指定ProxyIP和全局出站**：
    ```
    https://你的Pages域名/sub/你的UUID?proxyip=1&outbound=2
    ```
-   生成ID为1的ProxyIP和ID为2的全局出站 × 所有启用的CFIP的订阅
+   生成ID为1的ProxyIP和ID为2的全局出站 × 所有启用且未拉黑的CFIP的订阅
 
 5. **指定CFIP**：
    ```
    https://你的Pages域名/sub/你的UUID?cfip=1,2,3
    ```
-   生成所有启用的ProxyIP/全局出站 × ID为1、2、3的CFIP的订阅
+   生成所有启用的ProxyIP/全局出站 × ID为1、2、3且未拉黑的CFIP的订阅
 
 6. **完全自定义组合**：
    ```
@@ -412,12 +418,13 @@ https://你的Pages域名/sub/ss/你的密码?proxyip=1,2&cfip=1,2,3&speedTop=3&
 ```
 
 **重要说明：**
-- 指定ID时，**不管该ID是否启用状态**，都会被包含在订阅中
+- 指定ID时，**不管该ID是否启用状态**，都会被包含在订阅中；但已拉黑的 CFIP 始终会被排除
 - 未指定参数时，使用所有**启用状态**的项目
 - 指定`proxyip`或`outbound`参数时，只会使用指定的ID，不会包含其他启用的项目
-- 指定`cfip`参数时，只会使用指定的CFIP ID
+- 指定`cfip`参数时，只会使用指定且未拉黑的 CFIP ID
 - 可以灵活组合参数，生成不同的订阅链接
-- 节点数量 = (指定的ProxyIP数量 + 指定的Outbound数量) × 指定的CFIP数量
+- 节点数量 = (指定的ProxyIP数量 + 指定的Outbound数量) × 指定且未拉黑的CFIP数量
+- CFIP 同步黑名单只影响 CF 同步和订阅输出，不会从管理列表删除记录
 
 **使用场景：**
 - 为不同设备生成不同的订阅（如：手机用低延迟节点，电脑用高速节点）
@@ -545,12 +552,12 @@ icook.hk#优选域名
 - **VLESS 订阅**：
   - 确认 UUID 格式正确（标准 UUID 格式，并且是部署的老王的snip订阅的uuid）
   - 确认 Snippets/Worker 域名填写正确（不要带 `https://`）
-  - 确认至少添加了一个启用的 CFIP
+  - 确认至少添加了一个启用且未拉黑的 CFIP
 - **SS 订阅**：
   - 确认密码已填写
   - 确认 Snippets/Worker 域名填写正确
   - Path 可以留空（会自动使用密码作为路径）
-  - 确认至少添加了一个启用的 CFIP
+  - 确认至少添加了一个启用且未拉黑的 CFIP
 
 ### Q4：如何修改 API Key？
 在 Cloudflare Pages 设置页面：

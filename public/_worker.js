@@ -4,8 +4,9 @@ import { connect } from 'cloudflare:sockets';
 const CORS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Internal-Key',
 };
+const CFIP_SYNC_ALLOWED_CONDITION = '(sync_blacklisted = 0 OR sync_blacklisted IS NULL)';
 
 // 自动初始化数据库
 async function initDB(db) {
@@ -13,7 +14,7 @@ async function initDB(db) {
         CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, api_key TEXT UNIQUE, expires_at TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS proxy_ips (id INTEGER PRIMARY KEY, address TEXT, type TEXT, remark TEXT, enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
         CREATE TABLE IF NOT EXISTS outbounds (id INTEGER PRIMARY KEY, address TEXT, type TEXT, remark TEXT, enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0, exit_country TEXT, exit_city TEXT, exit_ip TEXT, exit_org TEXT, checked_at TEXT, created_at TEXT, updated_at TEXT);
-        CREATE TABLE IF NOT EXISTS cf_ips (id INTEGER PRIMARY KEY, address TEXT, port INTEGER DEFAULT 443, remark TEXT, sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
+        CREATE TABLE IF NOT EXISTS cf_ips (id INTEGER PRIMARY KEY, address TEXT, port INTEGER DEFAULT 443, remark TEXT, sort_order INTEGER DEFAULT 0, sync_blacklisted INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
         CREATE TABLE IF NOT EXISTS subscribe_config (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, token TEXT UNIQUE NOT NULL, uuid TEXT, snippets_domain TEXT, proxy_path TEXT, remark TEXT, enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
         CREATE TABLE IF NOT EXISTS argo_subscribe (id INTEGER PRIMARY KEY, token TEXT UNIQUE NOT NULL, template_link TEXT NOT NULL, remark TEXT, enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
     `).catch(() => { });
@@ -41,6 +42,7 @@ async function initDB(db) {
         await db.prepare(`ALTER TABLE cf_ips ADD COLUMN name TEXT`).run().catch(() => { });
         await db.prepare(`ALTER TABLE cf_ips ADD COLUMN fail_count INTEGER DEFAULT 0`).run().catch(() => { });
         await db.prepare(`ALTER TABLE cf_ips ADD COLUMN status TEXT DEFAULT 'enabled'`).run().catch(() => { });
+        await db.prepare(`ALTER TABLE cf_ips ADD COLUMN sync_blacklisted INTEGER DEFAULT 0`).run().catch(() => { });
     } catch (e) {
         // 忽略错误
     }
@@ -91,6 +93,38 @@ function generateToken() {
 
 function json(data, status = 200) {
     return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
+}
+
+function parseBooleanFlag(value) {
+    if (typeof value === 'string') return value.toLowerCase() === 'true' || value === '1';
+    return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function getSyncBlacklistedValue(body, defaultValue = false) {
+    if (body.sync_blacklisted !== undefined) return parseBooleanFlag(body.sync_blacklisted) ? 1 : 0;
+    if (body.blacklisted !== undefined) return parseBooleanFlag(body.blacklisted) ? 1 : 0;
+    return defaultValue ? 1 : 0;
+}
+
+function parsePositiveInteger(value) {
+    const numberValue = Number(value);
+    if (!Number.isInteger(numberValue) || numberValue <= 0) return null;
+    return numberValue;
+}
+
+function parseIdList(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return null;
+
+    const parsedIds = [];
+    const seen = new Set();
+    for (const id of ids) {
+        const parsedId = parsePositiveInteger(id);
+        if (!parsedId || seen.has(parsedId)) return null;
+        parsedIds.push(parsedId);
+        seen.add(parsedId);
+    }
+
+    return parsedIds;
 }
 
 function parseProxyType(addr) {
@@ -222,7 +256,7 @@ export default {
         if (path === '/api/internal/cfip' && method === 'GET') {
             const internalKey = request.headers.get('X-Internal-Key') || url.searchParams.get('key');
             if (internalKey === env.API_KEY) {
-                return handleGetCFIPs(env.DB);
+                return handleGetCFIPs(env.DB, { syncOnly: true });
             }
             return json({ error: 'Invalid Internal Key' }, 401);
         }
@@ -288,8 +322,13 @@ export default {
             if (method === 'GET') return handleGetCFIPs(env.DB);
             if (method === 'POST') return handleAddCFIP(request, env.DB);
         }
+        if (path === '/api/cfip/batch/blacklist' && method === 'POST') {
+            return handleBatchBlacklistCFIP(request, env.DB);
+        }
         if (path.startsWith('/api/cfip/')) {
-            const id = path.split('/')[3];
+            const parts = path.split('/');
+            const id = parts[3];
+            if (parts[4] === 'blacklist' && method === 'POST') return handleSetCFIPBlacklist(request, env.DB, id);
             if (method === 'PUT') return handleUpdateCFIP(request, env.DB, id);
             if (method === 'DELETE') return handleDeleteCFIP(env.DB, id);
         }
@@ -654,22 +693,25 @@ async function handleBatchAddOutbound(request, db) {
 }
 
 // CFIP CRUD
-async function handleGetCFIPs(db) {
-    const { results } = await db.prepare('SELECT * FROM cf_ips ORDER BY sort_order, id').all();
+async function handleGetCFIPs(db, options = {}) {
+    const where = options.syncOnly ? `WHERE ${CFIP_SYNC_ALLOWED_CONDITION}` : '';
+    const { results } = await db.prepare(`SELECT * FROM cf_ips ${where} ORDER BY sort_order, id`).all();
     return json({ success: true, data: results });
 }
 
 async function handleAddCFIP(request, db) {
-    const { address, port = 443, remark, name, sort_order = 0, latency, speed, country, isp, fail_count = 0, status = 'enabled' } = await request.json();
+    const body = await request.json();
+    const { address, port = 443, remark, name, sort_order = 0, latency, speed, country, isp, fail_count = 0, status = 'enabled' } = body;
+    const syncBlacklisted = getSyncBlacklistedValue(body);
     if (!address) return json({ error: '地址不能为空' }, 400);
 
     const max = await db.prepare('SELECT MAX(id) as m FROM cf_ips').first();
     const finalRemark = remark || `CFIP-${(max?.m || 0) + 1}`;
 
-    const r = await db.prepare('INSERT INTO cf_ips (address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime("now"), datetime("now"))')
-        .bind(address, port, finalRemark, name || null, sort_order, latency || null, speed || null, country || null, isp || null, fail_count, status).run();
+    const r = await db.prepare('INSERT INTO cf_ips (address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status, sync_blacklisted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime("now"), datetime("now"))')
+        .bind(address, port, finalRemark, name || null, sort_order, latency || null, speed || null, country || null, isp || null, fail_count, status, syncBlacklisted).run();
 
-    return json({ success: true, data: { id: r.meta.last_row_id, address, port, remark: finalRemark, name, latency, speed, country, isp, fail_count, status } });
+    return json({ success: true, data: { id: r.meta.last_row_id, address, port, remark: finalRemark, name, latency, speed, country, isp, fail_count, status, sync_blacklisted: syncBlacklisted } });
 }
 
 async function handleBatchAddCFIP(request, db) {
@@ -719,10 +761,11 @@ async function handleBatchAddCFIP(request, db) {
             const isp = item.isp || null;
             const fail_count = item.fail_count || 0;
             const status = item.status || 'enabled';
+            const sync_blacklisted = getSyncBlacklistedValue(item);
 
             statements.push(
-                db.prepare('INSERT INTO cf_ips (address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime("now"), datetime("now"))')
-                    .bind(address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status)
+                db.prepare('INSERT INTO cf_ips (address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status, sync_blacklisted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime("now"), datetime("now"))')
+                    .bind(address, port, remark, name, sort_order, latency, speed, country, isp, fail_count, status, sync_blacklisted)
             );
         }
 
@@ -764,6 +807,7 @@ async function handleUpdateCFIP(request, db, id) {
     if (body.isp !== undefined) { sets.push('isp = ?'); vals.push(body.isp); }
     if (body.fail_count !== undefined) { sets.push('fail_count = ?'); vals.push(body.fail_count); }
     if (body.status !== undefined) { sets.push('status = ?'); vals.push(body.status); }
+    if (body.sync_blacklisted !== undefined || body.blacklisted !== undefined) { sets.push('sync_blacklisted = ?'); vals.push(getSyncBlacklistedValue(body)); }
     if (sets.length === 0) return json({ error: '没有要更新的字段' }, 400);
 
     sets.push('updated_at = datetime("now")');
@@ -798,6 +842,50 @@ async function handleBatchStatusCFIP(request, db) {
     return json({ success: true });
 }
 
+async function handleSetCFIPBlacklist(request, db, id) {
+    const cfipId = parsePositiveInteger(id);
+    if (!cfipId) return json({ error: 'ID无效' }, 400);
+
+    const body = await request.json();
+    if (body.sync_blacklisted === undefined && body.blacklisted === undefined) {
+        return json({ error: 'sync_blacklisted不能为空' }, 400);
+    }
+
+    const syncBlacklisted = getSyncBlacklistedValue(body);
+    const result = await db.prepare('UPDATE cf_ips SET sync_blacklisted = ?, updated_at = datetime("now") WHERE id = ?')
+        .bind(syncBlacklisted, cfipId).run();
+    return json({
+        success: true,
+        data: {
+            id: cfipId,
+            sync_blacklisted: syncBlacklisted,
+            changes: result.meta?.changes ?? 0
+        }
+    });
+}
+
+async function handleBatchBlacklistCFIP(request, db) {
+    const body = await request.json();
+    const ids = parseIdList(body.ids);
+    if (!ids) return json({ error: 'IDs必须是非重复的正整数数组' }, 400);
+    if (body.sync_blacklisted === undefined && body.blacklisted === undefined) {
+        return json({ error: 'sync_blacklisted不能为空' }, 400);
+    }
+
+    const syncBlacklisted = getSyncBlacklistedValue(body);
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await db.prepare(`UPDATE cf_ips SET sync_blacklisted = ?, updated_at = datetime("now") WHERE id IN (${placeholders})`)
+        .bind(syncBlacklisted, ...ids).run();
+    return json({
+        success: true,
+        data: {
+            requested: ids.length,
+            changes: result.meta?.changes ?? 0,
+            sync_blacklisted: syncBlacklisted
+        }
+    });
+}
+
 async function handleBatchUpdateCFIP(request, db) {
     const { items } = await request.json();
     if (!Array.isArray(items) || items.length === 0) {
@@ -828,6 +916,10 @@ async function handleBatchUpdateCFIP(request, db) {
                     sets.push(`${field} = ?`);
                     vals.push(item[field]);
                 }
+            }
+            if (item.sync_blacklisted !== undefined || item.blacklisted !== undefined) {
+                sets.push('sync_blacklisted = ?');
+                vals.push(getSyncBlacklistedValue(item));
             }
 
             if (sets.length === 0) {
@@ -999,7 +1091,7 @@ async function handleArgoSubscribe(db, token, url) {
 
     // 使用 parseCfipStatusConditions 解析状态条件
     const conditions = parseCfipStatusConditions(cfipStatusParam);
-    const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) ORDER BY speed DESC, sort_order, id`;
+    const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`;
 
     // 2. 获取符合条件的CFIP
     const { results: cfips } = await db.prepare(query).all();
@@ -1242,7 +1334,7 @@ async function handleGenerateVlSubscribe(request, db) {
         conditions.push("status = 'enabled' OR status IS NULL");
     }
 
-    query += `(${conditions.join(' OR ')}) ORDER BY speed DESC, sort_order, id`;
+    query += `(${conditions.join(' OR ')}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`;
 
     const { results: cfips } = await db.prepare(query).all();
     if (cfips.length === 0) return json({ error: '没有符合条件的 CFIP' }, 400);
@@ -1286,7 +1378,7 @@ async function handleGenerateSSSubscribe(request, db) {
     // 保存配置，使用 uuid 字段存储 password
     await db.prepare('INSERT OR REPLACE INTO subscribe_config (id, uuid, snippets_domain, proxy_path, updated_at) VALUES (2, ?, ?, ?, datetime("now"))').bind(password, domain, finalPath).run();
 
-    const { results: cfips } = await db.prepare("SELECT * FROM cf_ips WHERE status = 'enabled' OR status IS NULL ORDER BY speed DESC, sort_order, id").all();
+    const { results: cfips } = await db.prepare(`SELECT * FROM cf_ips WHERE (status = 'enabled' OR status IS NULL) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`).all();
     if (cfips.length === 0) return json({ error: '没有启用的 CFIP' }, 400);
 
     const method = 'none';
@@ -1364,14 +1456,14 @@ async function handleSubscribe(db, uuid, url, configParam = null) {
     // 获取CFIP列表
     let cfips = [];
     if (cfipIds.length > 0) {
-        // 指定了CFIP ID，获取指定的CFIP（不管启用状态）
+        // 指定了CFIP ID，获取指定的CFIP（不管启用状态，但黑名单始终排除）
         const placeholders = cfipIds.map(() => '?').join(',');
-        const { results } = await db.prepare(`SELECT * FROM cf_ips WHERE id IN (${placeholders}) ORDER BY speed DESC, sort_order, id`).bind(...cfipIds).all();
+        const { results } = await db.prepare(`SELECT * FROM cf_ips WHERE id IN (${placeholders}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`).bind(...cfipIds).all();
         cfips = results;
     } else {
         // 未指定CFIP ID，根据 cfipStatus 筛选
         const conditions = parseCfipStatusConditions(cfipStatusParam);
-        const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) ORDER BY speed DESC, sort_order, id`;
+        const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`;
         const { results } = await db.prepare(query).all();
         cfips = results;
     }
@@ -1511,14 +1603,14 @@ async function handleSSSubscribe(db, password, url, configParam = null) {
     // 获取CFIP列表
     let cfips = [];
     if (cfipIds.length > 0) {
-        // 指定了CFIP ID，获取指定的CFIP（不管启用状态）
+        // 指定了CFIP ID，获取指定的CFIP（不管启用状态，但黑名单始终排除）
         const placeholders = cfipIds.map(() => '?').join(',');
-        const { results } = await db.prepare(`SELECT * FROM cf_ips WHERE id IN (${placeholders}) ORDER BY speed DESC, sort_order, id`).bind(...cfipIds).all();
+        const { results } = await db.prepare(`SELECT * FROM cf_ips WHERE id IN (${placeholders}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`).bind(...cfipIds).all();
         cfips = results;
     } else {
         // 未指定CFIP ID，根据 cfipStatus 筛选
         const conditions = parseCfipStatusConditions(cfipStatusParam);
-        const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) ORDER BY speed DESC, sort_order, id`;
+        const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) AND ${CFIP_SYNC_ALLOWED_CONDITION} ORDER BY speed DESC, sort_order, id`;
         const { results } = await db.prepare(query).all();
         cfips = results;
     }
@@ -2410,8 +2502,8 @@ async function handleTelegramImportCFIP(request, db) {
 
         // 插入数据
         const result = await db.prepare(
-            'INSERT INTO cf_ips (address, port, remark, enabled, sort_order, created_at) VALUES (?, ?, ?, 1, ?, datetime("now"))'
-        ).bind(address, port, remark || address, sortOrder).run();
+            'INSERT INTO cf_ips (address, port, remark, status, sync_blacklisted, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, datetime("now"), datetime("now"))'
+        ).bind(address, port, remark || address, 'enabled', sortOrder).run();
 
         return json({
             success: true,
@@ -2420,7 +2512,8 @@ async function handleTelegramImportCFIP(request, db) {
                 address,
                 port,
                 remark: remark || address,
-                enabled: true
+                status: 'enabled',
+                sync_blacklisted: 0
             }
         });
     } catch (error) {

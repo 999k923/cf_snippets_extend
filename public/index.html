@@ -248,6 +248,21 @@
             color: #1976d2
         }
 
+        .badge-success {
+            background: #e8f5e9;
+            color: #2e7d32
+        }
+
+        .badge-secondary {
+            background: #f1f3f4;
+            color: #5f6368
+        }
+
+        .badge-danger {
+            background: #ffebee;
+            color: #c62828
+        }
+
         .actions {
             display: flex;
             gap: 6px;
@@ -883,7 +898,7 @@
                 style="background:#e8f0fe;padding:10px;border-radius:6px;margin-bottom:12px;font-size:13px;color:#1967d2">
                 <strong>💡 说明：</strong>ProxyIP(反代IP) 用于普通 IP/域名代理，不支持 SOCKS5/HTTP 协议。如需添加 SOCKS5/HTTP
                 代理，请使用"全局出站"功能。<br>
-                <strong>📊 节点数量计算：</strong>订阅节点数量 = (反代IP数量 + 全局出站数量) × 优选域名数量。<strong
+                <strong>📊 节点数量计算：</strong>订阅节点数量 = (反代IP数量 + 全局出站数量) × 未拉黑优选域名数量。<strong
                     style="color:#f14668">不添加反代IP的话，不会生成原生节点。</strong>
             </div>
             <div id="proxyipListView">
@@ -963,6 +978,8 @@
                         <option value="invalid">失效</option>
                     </select>
                     <button class="btn btn-info btn-sm" data-icon="✓" onclick="batchSetStatus('cfip')">设置状态</button>
+                    <button class="btn btn-danger btn-sm" onclick="batchSetBlacklist('cfip',true)">拉黑</button>
+                    <button class="btn btn-success btn-sm" onclick="batchSetBlacklist('cfip',false)">解黑</button>
                     <button class="btn btn-danger btn-sm" data-icon="🗑️" onclick="batchDelete('cfip')">🗑️ 删除</button>
                     <div style="position:relative">
                         <button class="btn btn-sm" style="background:#f0f0f0;border:1px solid #ddd"
@@ -1047,7 +1064,8 @@
             <div
                 style="background:#e8f0fe;padding:10px;border-radius:6px;margin-bottom:12px;font-size:13px;color:#1967d2">
                 <strong>💡 说明：</strong>CFIP(优选域名) 用于配置 Cloudflare 优选 IP 或域名，作为节点的连接地址。<br>
-                <strong>📊 节点数量计算：</strong>订阅节点数量 = (反代IP数量 + 全局出站数量) × 优选域名数量。
+                <strong>📊 节点数量计算：</strong>订阅节点数量 = (反代IP数量 + 全局出站数量) × 未拉黑优选域名数量。<br>
+                <strong>同步黑名单：</strong>被拉黑的 CFIP 会保留在管理列表中，但不会参与 CF 同步和订阅生成。
             </div>
             <div id="cfipListView">
                 <table class="table">
@@ -1072,6 +1090,8 @@
                                 <span id="sort-icon-speed"></span>
                             </th>
                             <th>状态</th>
+                            <th class="sort-header" onclick="handleCFIPSort('sync_blacklisted')">CF同步 <span
+                                    id="sort-icon-sync_blacklisted"></span></th>
                             <th>操作</th>
                         </tr>
                     </thead>
@@ -1107,7 +1127,7 @@
                 • <code>?outbound=1,2</code> - 指定全局出站的ID<br>
                 • <code>?cfip=1,2,3</code> - 指定CFIP的ID<br>
                 • <code>?proxyip=1&outbound=2&cfip=1,2</code> - 组合使用<br>
-                <strong style="color:#d9534f">⚠️ 指定ID时不检查启用状态</strong>，即使被禁用也会包含在订阅中。
+                <strong style="color:#d9534f">⚠️ 指定ID时不检查启用状态</strong>，即使被禁用也会包含在订阅中；同步黑名单仍会被排除。
             </div>
 
             <div id="vlConfigList"></div>
@@ -1132,7 +1152,7 @@
                 • <code>?outbound=1,2</code> - 指定全局出站的ID<br>
                 • <code>?cfip=1,2,3</code> - 指定CFIP的ID<br>
                 • <code>?proxyip=1&outbound=2&cfip=1,2</code> - 组合使用<br>
-                <strong style="color:#d9534f">⚠️ 指定ID时不检查启用状态</strong>，即使被禁用也会包含在订阅中。
+                <strong style="color:#d9534f">⚠️ 指定ID时不检查启用状态</strong>，即使被禁用也会包含在订阅中；同步黑名单仍会被排除。
             </div>
 
             <div id="ssConfigList"></div>
@@ -1150,10 +1170,10 @@
             <div
                 style="background:#e8f0fe;padding:10px;border-radius:6px;margin-bottom:12px;font-size:13px;color:#1967d2">
                 <strong>💡 说明：</strong><br>
-                1、ARGO 优选订阅用于管理 V<span>LESS</span>/V<span>Mess</span> 模板链接，系统会自动将模板中的"优选域名/IP:端口"替换为所有启用的
+                1、ARGO 优选订阅用于管理 V<span>LESS</span>/V<span>Mess</span> 模板链接，系统会自动将模板中的"优选域名/IP:端口"替换为所有启用且未拉黑的
                 CFIP，生成多个优化节点。<br>
                 2、支持 V<span>LESS</span> 和 V<span>Mess</span> 两种协议。<br>
-                3、节点数量：每个模板会生成 N 个节点（N = 启用的 CFIP 数量）。
+                3、节点数量：每个模板会生成 N 个节点（N = 启用且未拉黑的 CFIP 数量）。
             </div>
 
             <div id="argoConfigList"></div>
@@ -1827,7 +1847,7 @@
                     let valA = a[cfipSortColumn];
                     let valB = b[cfipSortColumn];
 
-                    if (cfipSortColumn === 'id' || cfipSortColumn === 'port' || cfipSortColumn === 'fail_count' || cfipSortColumn === 'speed' || cfipSortColumn === 'latency') {
+                    if (cfipSortColumn === 'id' || cfipSortColumn === 'port' || cfipSortColumn === 'fail_count' || cfipSortColumn === 'speed' || cfipSortColumn === 'latency' || cfipSortColumn === 'sync_blacklisted') {
                         valA = parseFloat(valA) || 0;
                         valB = parseFloat(valB) || 0;
                     } else {
@@ -1869,6 +1889,9 @@
                     if (status === 'enabled') statusColor = '#48c774';
                     else if (status === 'disabled') statusColor = '#b5b5b5';
                     else if (status === 'invalid') statusColor = '#f14668';
+                    const isBlacklisted = Number(i.sync_blacklisted) === 1;
+                    const syncText = isBlacklisted ? '已拉黑' : '可同步';
+                    const syncBadgeClass = isBlacklisted ? 'danger' : 'success';
 
                     return `<tr>
 <td><input type="checkbox" class="cfip-check" value="${i.id}"></td>
@@ -1887,8 +1910,10 @@
         <option value="invalid" ${status === 'invalid' ? 'selected' : ''}>失效</option>
     </select>
 </td>
+<td><span class="badge badge-${syncBadgeClass}">${syncText}</span></td>
 <td class="actions">
 <button class="btn btn-warning btn-sm" data-icon="✏️" onclick="editItem('cfip',${i.id},'${i.address.replace(/'/g, "\\\\'")}', '${(i.remark || '').replace(/'/g, "\\\\'")}', ${i.port}, '${(i.name || '').replace(/'/g, "\\\\'")}')">✏️ 编辑</button>
+<button class="btn btn-${isBlacklisted ? 'success' : 'danger'} btn-sm" onclick="toggleCFIPBlacklist(${i.id},${isBlacklisted ? 0 : 1})">${isBlacklisted ? '解黑' : '拉黑'}</button>
 </td></tr>`;
                 }).join('');
                 document.getElementById('cfipCheckAll').checked = false;
@@ -1897,6 +1922,8 @@
                 document.getElementById('cfipCardView').innerHTML = pageData.map(i => {
                     const status = i.status || 'enabled';
                     const statusClass = status === 'enabled' ? 'online' : (status === 'invalid' ? 'bad' : 'offline');
+                    const isBlacklisted = Number(i.sync_blacklisted) === 1;
+                    const syncText = isBlacklisted ? '已拉黑' : '可同步';
 
                     return `<div class="outbound-card ${statusClass}" id="cfip-card-${i.id}">
 <input type="checkbox" class="card-checkbox cfip-check" value="${i.id}">
@@ -1914,10 +1941,14 @@
 <span>失败: ${i.fail_count || 0}</span>
 <span style="margin-left:8px">状态: ${status}</span>
 </div>
+<div class="card-info-row" style="margin-top:4px;font-size:11px;color:#666">
+<span>CF同步: ${syncText}</span>
+</div>
 </div>
 <div class="card-actions">
 <div style="flex:1"></div>
 <span onclick="editItem('cfip',${i.id},'${i.address.replace(/'/g, "\\\\'")}','${(i.remark || '').replace(/'/g, "\\\\'")}',${i.port},'${(i.name || '').replace(/'/g, "\\\\'")}')" style="color:#667eea;cursor:pointer;font-size:13px;user-select:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">✏️ 编辑</span>
+<button class="btn btn-${isBlacklisted ? 'success' : 'danger'} btn-sm" onclick="toggleCFIPBlacklist(${i.id},${isBlacklisted ? 0 : 1})">${isBlacklisted ? '解黑' : '拉黑'}</button>
 </div>
 </div>`;
                 }).join('');
@@ -1956,7 +1987,7 @@
         }
 
         function updateSortIcons() {
-            const columns = ['id', 'name', 'remark', 'address', 'port', 'fail_count', 'latency', 'speed'];
+            const columns = ['id', 'name', 'remark', 'address', 'port', 'fail_count', 'latency', 'speed', 'sync_blacklisted'];
             columns.forEach(col => {
                 const icon = document.getElementById('sort-icon-' + col);
                 if (icon) {
@@ -2381,6 +2412,23 @@
                 if (type === 'proxyip') await loadProxyIPs();
                 else if (type === 'outbound') await loadOutbounds();
                 else await loadCFIPs();
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function toggleCFIPBlacklist(id, syncBlacklisted) {
+            showLoading();
+            try {
+                const d = await api('/cfip/' + id + '/blacklist', 'POST', { sync_blacklisted: syncBlacklisted ? 1 : 0 });
+                if (!d.success) {
+                    alert(d.error || '操作失败');
+                    return;
+                }
+                if ((d.data?.changes ?? 0) === 0) {
+                    alert('未找到要修改的 CFIP 记录');
+                }
+                await loadCFIPs();
             } finally {
                 hideLoading();
             }
@@ -3027,6 +3075,7 @@
                         name: item.name,
                         fail_count: item.fail_count,
                         status: item.status || 'enabled',
+                        sync_blacklisted: item.sync_blacklisted !== undefined ? item.sync_blacklisted : item.blacklisted,
                         // Optional fields might be needed if export includes them
                         latency: item.latency,
                         speed: item.speed,
@@ -3283,6 +3332,38 @@
             else if (type === 'outbound') await loadOutbounds();
             else if (type === 'argo') await loadArgoSubscribes();
             else await loadCFIPs();
+        }
+
+        async function batchSetBlacklist(type, syncBlacklisted) {
+            if (type !== 'cfip') return;
+            const checks = Array.from(document.querySelectorAll('.cfip-check:checked')).filter(cb => {
+                let el = cb;
+                while (el) {
+                    if (el.classList && el.classList.contains('hidden')) return false;
+                    el = el.parentElement;
+                }
+                return true;
+            });
+            if (checks.length === 0) return alert('请先选择要修改的 CFIP');
+
+            const actionText = syncBlacklisted ? '拉黑' : '解黑';
+            if (!confirm(`确定${actionText}选中的 ${checks.length} 项？`)) return;
+
+            const ids = checks.map(cb => parseInt(cb.value));
+            showLoading();
+            try {
+                const d = await api('/cfip/batch/blacklist', 'POST', { ids, sync_blacklisted: syncBlacklisted ? 1 : 0 });
+                if (d.success) {
+                    alert(`操作完成：实际更新 ${d.data?.changes ?? 0} 条`);
+                } else {
+                    alert('操作失败: ' + (d.error || '未知错误'));
+                }
+                await loadCFIPs();
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            } finally {
+                hideLoading();
+            }
         }
 
         async function batchSetStatus(type) {
