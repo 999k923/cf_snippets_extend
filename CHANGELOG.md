@@ -23,6 +23,7 @@
 - 公开订阅 URL 支持通过 `include_blacklisted_cfip=1` 临时覆盖订阅配置，包含已拉黑 CFIP。
 - Telegram CFIP 导入现在写入 `status = 'enabled'` 和 `sync_blacklisted = 0`。
 - 布尔类 API 字段现在支持大小写不敏感的字符串 `true`，以及数字/字符串 `1`。
+- 管理页面主容器改为更宽的布局，并减少左右留白，提升宽屏空间利用率。
 
 ### 兼容性
 
