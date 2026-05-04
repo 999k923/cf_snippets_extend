@@ -20,6 +20,7 @@
 - 内部 CFIP 同步现在只返回未拉黑的 CFIP。
 - VLESS、SS、ARGO、Token 订阅和订阅生成接口默认排除已拉黑 CFIP；开启 `include_blacklisted_cfip = 1` 后可包含已拉黑 CFIP。
 - 显式订阅参数 `?cfip=1,2,3` 仍然不检查 CFIP 状态；是否包含已拉黑 CFIP 由订阅配置决定。
+- 公开订阅 URL 支持通过 `include_blacklisted_cfip=1` 临时覆盖订阅配置，包含已拉黑 CFIP。
 - Telegram CFIP 导入现在写入 `status = 'enabled'` 和 `sync_blacklisted = 0`。
 - 布尔类 API 字段现在支持大小写不敏感的字符串 `true`，以及数字/字符串 `1`。
 
@@ -35,3 +36,4 @@
 - 黑名单更新响应包含 `changes`；`changes = 0` 表示请求成功，但没有匹配到实际被更新的 CFIP 记录。
 - `/api/internal/cfip` 不受 `include_blacklisted_cfip` 影响，始终排除已拉黑 CFIP。
 - 生成 VLESS/SS 订阅时，如果请求体未传 `include_blacklisted_cfip`，会保留已有订阅配置值；没有已有配置时默认排除已拉黑 CFIP。
+- 公开订阅 URL 参数 `include_blacklisted_cfip` 和 `includeBlacklistedCfip` 只影响当前请求，不会写入数据库。

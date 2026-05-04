@@ -54,6 +54,16 @@
 
 `/api/subscribe/vless/generate` 和 `/api/subscribe/ss/generate` 未传该字段时保留已有订阅配置值；没有已有配置时按默认 `0` 处理。
 
+公开订阅 URL 也支持临时覆盖该设置：
+
+```text
+/sub/{uuid}?include_blacklisted_cfip=1
+/sub/ss/{password}?include_blacklisted_cfip=1
+/sub/argo/{token}?include_blacklisted_cfip=1
+```
+
+URL 参数兼容驼峰别名 `includeBlacklistedCfip`。
+
 ## 获取管理列表
 
 - **URL**: `/api/cfip`
@@ -277,4 +287,10 @@
 
 ```text
 /sub/{uuid}?cfip=1,2,3
+```
+
+需要临时包含已拉黑 CFIP 时，可在公开订阅 URL 添加：
+
+```text
+/sub/{uuid}?cfip=1,2,3&include_blacklisted_cfip=1
 ```

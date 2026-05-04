@@ -422,6 +422,7 @@ https://你的Pages域名/sub/ss/你的密码?proxyip=1,2&cfip=1,2,3&speedTop=3&
 - 未指定参数时，使用所有**启用状态**的项目
 - 指定`proxyip`或`outbound`参数时，只会使用指定的ID，不会包含其他启用的项目
 - 指定`cfip`参数时，只会使用指定且符合订阅配置的 CFIP ID
+- 可通过 `include_blacklisted_cfip=1` 临时让公开订阅包含已拉黑 CFIP，例如：`/sub/你的UUID?include_blacklisted_cfip=1`
 - 可以灵活组合参数，生成不同的订阅链接
 - 节点数量 = (指定的ProxyIP数量 + 指定的Outbound数量) × 指定且符合订阅配置的CFIP数量
 - CFIP 同步黑名单始终影响 CF 同步，不会从管理列表删除记录；订阅输出是否包含拉黑 CFIP 由对应订阅配置决定

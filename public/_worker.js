@@ -135,6 +135,16 @@ function getCfipSubscribeCondition(includeBlacklistedCfip) {
     return parseBooleanFlag(includeBlacklistedCfip) ? '1 = 1' : CFIP_SYNC_ALLOWED_CONDITION;
 }
 
+function getCfipSubscribeConditionFromParams(urlParams, configValue) {
+    if (urlParams.has('include_blacklisted_cfip')) {
+        return getCfipSubscribeCondition(urlParams.get('include_blacklisted_cfip'));
+    }
+    if (urlParams.has('includeBlacklistedCfip')) {
+        return getCfipSubscribeCondition(urlParams.get('includeBlacklistedCfip'));
+    }
+    return getCfipSubscribeCondition(configValue);
+}
+
 function parsePositiveInteger(value) {
     const numberValue = Number(value);
     if (!Number.isInteger(numberValue) || numberValue <= 0) return null;
@@ -1124,7 +1134,7 @@ async function handleArgoSubscribe(db, token, url) {
 
     // 使用 parseCfipStatusConditions 解析状态条件
     const conditions = parseCfipStatusConditions(cfipStatusParam);
-    const cfipSubscribeCondition = getCfipSubscribeCondition(template.include_blacklisted_cfip);
+    const cfipSubscribeCondition = getCfipSubscribeConditionFromParams(urlParams, template.include_blacklisted_cfip);
     const query = `SELECT * FROM cf_ips WHERE (${conditions.join(' OR ')}) AND ${cfipSubscribeCondition} ORDER BY speed DESC, sort_order, id`;
 
     // 2. 获取符合条件的CFIP
@@ -1498,7 +1508,7 @@ async function handleSubscribe(db, uuid, url, configParam = null) {
 
     // 获取CFIP列表
     let cfips = [];
-    const cfipSubscribeCondition = getCfipSubscribeCondition(config.include_blacklisted_cfip);
+    const cfipSubscribeCondition = getCfipSubscribeConditionFromParams(urlParams, config.include_blacklisted_cfip);
     if (cfipIds.length > 0) {
         // 指定了CFIP ID，获取指定的CFIP（不管启用状态）
         const placeholders = cfipIds.map(() => '?').join(',');
@@ -1646,7 +1656,7 @@ async function handleSSSubscribe(db, password, url, configParam = null) {
 
     // 获取CFIP列表
     let cfips = [];
-    const cfipSubscribeCondition = getCfipSubscribeCondition(config.include_blacklisted_cfip);
+    const cfipSubscribeCondition = getCfipSubscribeConditionFromParams(urlParams, config.include_blacklisted_cfip);
     if (cfipIds.length > 0) {
         // 指定了CFIP ID，获取指定的CFIP（不管启用状态）
         const placeholders = cfipIds.map(() => '?').join(',');
