@@ -1025,8 +1025,8 @@
                 </div>
             </div>
             <div
-                style="display:flex;gap:12px;margin-bottom:12px;align-items:center;background:#f7f9fc;padding:8px;border-radius:8px">
-                <div style="flex:1">
+                style="display:flex;gap:12px;margin-bottom:12px;align-items:center;background:#f7f9fc;padding:8px;border-radius:8px;flex-wrap:wrap">
+                <div style="flex:1;min-width:220px">
                     <input type="text" placeholder="🔍 搜索 IP / 端口 / 备注..."
                         style="width:100%;padding:6px 10px;border:1px solid #e1e8ed;border-radius:6px;font-size:13px"
                         oninput="handleCFIPSearch(event)">
@@ -1045,6 +1045,18 @@
                     <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox"
                             class="cfip-status-check" value="invalid" checked onchange="handleCFIPStatusChange(event)">
                         失效</label>
+                </div>
+                <div
+                    style="display:flex;align-items:center;gap:12px;font-size:13px;color:#666;border-left:1px solid #e1e8ed;padding-left:12px">
+                    <span>CF同步:</span>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox"
+                            value="sync_all" checked onchange="handleCFIPSyncChange(event)"> 全选</label>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox"
+                            class="cfip-sync-check" value="allowed" checked onchange="handleCFIPSyncChange(event)">
+                        可同步</label>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox"
+                            class="cfip-sync-check" value="blacklisted" checked onchange="handleCFIPSyncChange(event)">
+                        已拉黑</label>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:#666">
                     每页显示:
@@ -1288,6 +1300,18 @@
         // Global state for CFIP pagination and search
         let cfipSearchText = '';
         let cfipStatusFilter = JSON.parse(localStorage.getItem('cfipStatusFilter')) || ['enabled', 'disabled', 'invalid'];
+        let cfipSyncFilter = (function () {
+            const saved = localStorage.getItem('cfipSyncFilter');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch (e) {
+                    console.error('Failed to parse cfipSyncFilter from localStorage', e);
+                }
+            }
+            return ['allowed', 'blacklisted'];
+        })();
         let cfipPageSize = 20;
         let cfipCurrentPage = 1;
         // Column visibility settings (default: hide optional columns)
@@ -1825,6 +1849,7 @@
                 cachedCFIPs = d.data; // 更新缓存
                 renderCFIPs();
                 initCFIPStatusCheckboxes(); // 初始化checkbox状态
+                initCFIPSyncCheckboxes();
             }
         }
 
@@ -1845,6 +1870,16 @@
             if (disabledCheck) disabledCheck.checked = cfipStatusFilter.includes('disabled');
             if (invalidCheck) invalidCheck.checked = cfipStatusFilter.includes('invalid');
             if (allCheck) allCheck.checked = cfipStatusFilter.length === 3;
+        }
+
+        function initCFIPSyncCheckboxes() {
+            const allowedCheck = document.querySelector('input.cfip-sync-check[value="allowed"]');
+            const blacklistedCheck = document.querySelector('input.cfip-sync-check[value="blacklisted"]');
+            const allCheck = document.querySelector('input[value="sync_all"]');
+
+            if (allowedCheck) allowedCheck.checked = cfipSyncFilter.includes('allowed');
+            if (blacklistedCheck) blacklistedCheck.checked = cfipSyncFilter.includes('blacklisted');
+            if (allCheck) allCheck.checked = cfipSyncFilter.length === 2;
         }
 
         function renderCFIPs() {
@@ -1878,6 +1913,14 @@
                 filteredData = filteredData.filter(item => {
                     const status = item.status || 'enabled';
                     return cfipStatusFilter.includes(status);
+                });
+            }
+
+            // CF sync blacklist filter
+            if (cfipSyncFilter.length < 2) {
+                filteredData = filteredData.filter(item => {
+                    const syncStatus = Number(item.sync_blacklisted) === 1 ? 'blacklisted' : 'allowed';
+                    return cfipSyncFilter.includes(syncStatus);
                 });
             }
 
@@ -2047,6 +2090,31 @@
             }
             cfipCurrentPage = 1;
             localStorage.setItem('cfipStatusFilter', JSON.stringify(cfipStatusFilter));
+            renderCFIPs();
+        }
+
+        function handleCFIPSyncChange(e) {
+            const val = e.target.value;
+            const isChecked = e.target.checked;
+
+            if (val === 'sync_all') {
+                const checks = document.querySelectorAll('.cfip-sync-check');
+                checks.forEach(c => c.checked = isChecked);
+                cfipSyncFilter = isChecked ? ['allowed', 'blacklisted'] : [];
+            } else {
+                if (isChecked) {
+                    if (!cfipSyncFilter.includes(val)) cfipSyncFilter.push(val);
+                } else {
+                    cfipSyncFilter = cfipSyncFilter.filter(s => s !== val);
+                }
+
+                const allCheck = document.querySelector('input[value="sync_all"]');
+                const checks = document.querySelectorAll('.cfip-sync-check');
+                const allChecked = Array.from(checks).every(c => c.checked);
+                if (allCheck) allCheck.checked = allChecked;
+            }
+            cfipCurrentPage = 1;
+            localStorage.setItem('cfipSyncFilter', JSON.stringify(cfipSyncFilter));
             renderCFIPs();
         }
 
